@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1216">
+<title>Dakar Studio - Moteur Pollinations</title>
+<style>
+  :root { --bg:#0f1216; --card:#1a1f26; --fg:#e8ecf1; --muted:#8a93a0;
+          --accent:#ff8a3d; --ok:#2fbf71; --err:#e5484d; --line:#252b33; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0 auto; padding:16px 12px 40px; max-width:800px;
+         font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+         background:var(--bg); color:var(--fg); }
+  header { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+  h1 { font-size:24px; margin:0 0 4px; }
+  .sub { color:var(--accent); font-size:13px; font-weight: 600; text-transform: uppercase; }
+  
+  .card { background:var(--card); border-radius:12px; padding:16px; margin-bottom:20px; border: 1px solid var(--line); }
+  .shot-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+  .shot-title { font-size: 16px; font-weight: bold; }
+  .shot-lieu { color:var(--muted); font-size:13px; margin-top: 2px; }
+  .shot-num { background: var(--accent); color: #000; font-weight: 900; padding: 4px 10px; border-radius: 6px; font-size: 14px; }
+  
+  .prompt-box { background: #0b0e14; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 12px; color: #cbd5e1; margin-top: 8px; word-break: break-word; }
+  
+  .action-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  button { border:0; border-radius:8px; padding:10px 16px; font-weight:600; cursor:pointer; font-size: 13px; transition: all 0.2s; }
+  .btn-gen { background: var(--accent); color: #111; }
+  .btn-gen:disabled { opacity: 0.5; cursor: wait; }
+  .btn-download { background: #2a313b; color: var(--fg); }
+  
+  .media-preview { margin-top: 12px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); max-width: 100%; }
+  .media-preview img, .media-preview video { width: 100%; display: block; }
+  
+  .status { font-size: 12px; margin-top: 8px; font-weight: 600; }
+  .status.ok { color: var(--ok); }
+  .status.error { color: var(--err); }
+  .status.loading { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎬 Dakar Studio</h1>
+  <div class="sub">Moteur de Production Pollinations</div>
+</header>
+
+<section class="card">
+  <label style="font-size:13px; color:var(--muted);">Clé Secrète API Pollinations (sk_...)</label>
+  <input id="apiKey" type="password" placeholder="Colle ta clé ici" style="width:100%; padding:12px; border-radius:8px; border:1px solid var(--line); background:#0b0e14; color:var(--fg); margin-top:8px;">
+  <button class="btn-gen" style="margin-top:8px; width:100%;" onclick="saveKey()">Sauvegarder la clé</button>
+  <div id="keyStatus" style="font-size:12px; color:var(--muted); margin-top:6px;"></div>
+</section>
+
+<section id="shots"></section>
+
+<script>
+const STYLE_3D = "Masterpiece cinematic 3D animated render, espionage thriller look, 100 billion euro blockbuster movie quality. Ultra-detailed textures, ray-tracing, soft volumetric lighting, shallow depth of field. Warm Dakar palette. Vertical 9:16 framing.";
+const PERSOS = {
+  MOUSSA: "Moussa: A 45-year-old Senegalese man, broad shoulders, short grey-flecked beard, small scar over left eyebrow, wearing a worn olive jacket over a white t-shirt and dark jeans.",
+  BAMBA: "Bamba: A 19-year-old Senegalese young man, lean, short curly hair, bright smile, wearing a red football jersey and denim shorts.",
+  AICHA: "Aicha: A 26-year-old Senegalese woman, oval face, braided hair in a high bun, round glasses, wearing a mustard-yellow jacket.",
+  SARR: "Cheikh Sarr: A 55-year-old Senegalese man, tall, silver hair, trimmed goatee, cold eyes, wearing an impeccable navy three-piece suit."
+};
+
+// Données de l'épisode 1 (version simplifiée pour l'exemple)
+const SHOTS = [
+  { id: 1, lieu: "Port de Dakar, Nuit", speaker: null, dialogue: "", action: "{MOUSSA} dives behind a crate as a container explodes.", cam: "Camera shake, slow motion." },
+  { id: 2, lieu: "Appartement, Aube", speaker: "MOUSSA", dialogue: "Ibou… je te dois la vérité.", action: "{MOUSSA} holding an old photo.", cam: "Slow push-in." },
+  { id: 3, lieu: "Toit, Matin", speaker: "BAMBA", dialogue: "Patron ! Un conteneur suspect arrive ce soir.", action: "{BAMBA} on a rooftop, waving.", cam: "Tracking shot." }
+];
+
+const STATE = JSON.parse(localStorage.getItem('dakar_pollinations_state')) || {};
+SHOTS.forEach(s => { if (!STATE[s.id]) STATE[s.id] = { status: 'pending', imageUrl: null, videoUrl: null }; });
+
+function saveState() { localStorage.setItem('dakar_pollinations_state', JSON.stringify(STATE)); }
+function saveKey() {
+  const key = document.getElementById('apiKey').value.trim();
+  if (key) { localStorage.setItem('pollinations_key', key); updateKeyStatus(); }
+}
+function updateKeyStatus() {
+  const key = localStorage.getItem('pollinations_key');
+  document.getElementById('keyStatus').textContent = key ? "✓ Clé configurée." : "⚠️ Aucune clé configurée.";
+}
+
+function buildPrompt(shot) {
+  let p = shot.action;
+  for (const [k, v] of Object.entries(PERSOS)) { p = p.split('{' + k + '}').join(v); }
+  return `${STYLE_3D}\n\nSCENE: ${p}`;
+}
+
+async function generateImage(shot) {
+  const key = localStorage.getItem('pollinations_key');
+  if (!key) return alert("Veuillez d'abord sauvegarder votre clé API.");
+  
+  const st = STATE[shot.id];
+  st.status = 'generating_image';
+  render();
+  
+  const prompt = encodeURIComponent(buildPrompt(shot));
+  const url = `https://gen.pollinations.ai/image/${prompt}?model=flux&width=720&height=1280&nologo=true&key=${key}`;
+  
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Erreur de génération");
+    const blob = await res.blob();
+    st.imageUrl = URL.createObjectURL(blob);
+    st.status = 'image_ready';
+    saveState();
+    render();
+  } catch (e) {
+    st.status = 'error';
+    render();
+    alert("Erreur lors de la génération de l'image.");
+  }
+}
+
+async function generateVideo(shot) {
+  const key = localStorage.getItem('pollinations_key');
+  if (!key || !STATE[shot.id].imageUrl) return alert("Image non générée ou clé manquante.");
+  
+  const st = STATE[shot.id];
+  st.status = 'generating_video';
+  render();
+  
+  const prompt = encodeURIComponent(buildPrompt(shot));
+  // Utilisation du modèle seedance pour l'image-to-video
+  const url = `https://gen.pollinations.ai/video/${prompt}?model=seedance&image[0]=${encodeURIComponent(st.imageUrl)}&duration=5&aspectRatio=9:16&key=${key}`;
+  
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Erreur de génération vidéo");
+    const blob = await res.blob();
+    st.videoUrl = URL.createObjectURL(blob);
+    st.status = 'done';
+    saveState();
+    render();
+  } catch (e) {
+    st.status = 'error';
+    render();
+    alert("Erreur lors de la génération de la vidéo.");
+  }
+}
+
+function render() {
+  const container = document.getElementById('shots');
+  container.innerHTML = SHOTS.map(s => {
+    const st = STATE[s.id];
+    let content = '';
+
+    if (st.imageUrl) {
+      content += `<div class="media-preview"><img src="${st.imageUrl}"></div>`;
+    }
+
+    if (st.videoUrl) {
+      content += `<div class="media-preview"><video src="${st.videoUrl}" controls></video></div>`;
+    }
+
+    let statusText = 'En attente';
+    let statusClass = '';
+    if (st.status === 'image_ready') { statusText = 'Image prête'; statusClass = 'ok'; }
+    else if (st.status === 'generating_image') { statusText = 'Génération de l\'image...'; statusClass = 'loading'; }
+    else if (st.status === 'generating_video') { statusText = 'Génération de la vidéo...'; statusClass = 'loading'; }
+    else if (st.status === 'done') { statusText = 'Terminé !'; statusClass = 'ok'; }
+    else if (st.status === 'error') { statusText = 'Erreur'; statusClass = 'error'; }
+
+    return `
+      <div class="card">
+        <div class="shot-header">
+          <div>
+            <div class="shot-title">Scène ${s.id}</div>
+            <div class="shot-lieu">${s.lieu}</div>
+          </div>
+          <div class="shot-num">${s.id}</div>
+        </div>
+        
+        <div class="prompt-box">${buildPrompt(s).substring(0, 100)}...</div>
+        
+        <div class="action-row">
+          <button class="btn-gen" onclick="generateImage(SHOTS[${s.id - 1}])" ${st.status === 'generating_image' ? 'disabled' : ''}>🖼️ Image</button>
+          <button class="btn-gen" onclick="generateVideo(SHOTS[${s.id - 1}])" ${st.status !== 'image_ready' && st.status !== 'done' ? 'disabled' : ''}>🎬 Vidéo</button>
+          ${st.videoUrl ? `<a href="${st.videoUrl}" download="scene_${s.id}.mp4" class="btn-download" style="text-decoration:none; display:inline-flex; align-items:center;">⬇️ Télécharger</a>` : ''}
+        </div>
+        
+        <div class="status ${statusClass}">${statusText}</div>
+        ${content}
+      </div>
+    `;
+  }).join('');
+}
+
+// Initialisation
+updateKeyStatus();
+render();
+</script>
+</body>
+</html>
